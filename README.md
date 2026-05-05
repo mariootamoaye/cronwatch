@@ -43,12 +43,13 @@ cronwatch will send an alert if the job:
 
 ## Options
 
-| Flag | Description |
-|------|-------------|
-| `--name` | Unique job name for identification in alerts |
-| `--timeout` | Max allowed runtime in seconds |
-| `--config` | Path to config file (default: `~/.cronwatch.yml`) |
-| `--quiet` | Suppress stdout output from the wrapped command |
+| Flag | Default | Description |
+|------|---------|-------------|
+| `--name` | *(required)* | Unique job name for identification in alerts |
+| `--timeout` | none | Max allowed runtime in seconds |
+| `--config` | `~/.cronwatch.yml` | Path to config file |
+| `--quiet` | false | Suppress stdout output from the wrapped command |
+| `--retries` | `0` | Number of times to retry a failed job before alerting |
 
 ## License
 
