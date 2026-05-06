@@ -1,38 +1,30 @@
 # cronwatch configuration
 
-log_file: cronwatch.log
-check_interval: 60
+history_path: ~/.cronwatch/history.json
 
-alerts:
+retention:
+  max_age_days: 30
+  max_entries: 500
+
+alert:
   email: ops@example.com
-  webhook_url: null
-  slack_channel: null
+  on_failure: true
+  on_timeout: true
+  on_slow: false
 
 jobs:
   - name: daily-backup
+    command: /usr/local/bin/backup.sh
     schedule: "0 2 * * *"
-    timeout: 1800
-    alert_on_failure: true
-    alert_on_timeout: true
-    retries: 2
-    tags:
-      - backup
-      - critical
+    timeout: 3600
+    max_duration: 1800
 
-  - name: hourly-sync
-    schedule: "0 * * * *"
-    timeout: 300
-    alert_on_failure: true
-    alert_on_timeout: false
-    retries: 3
-    tags:
-      - sync
+  - name: health-check
+    command: /usr/local/bin/healthcheck.sh
+    schedule: "*/5 * * * *"
+    timeout: 30
 
   - name: weekly-report
+    command: /usr/local/bin/report.py
     schedule: "0 9 * * 1"
-    timeout: 600
-    alert_on_failure: true
-    alert_on_timeout: true
-    retries: 1
-    tags:
-      - reporting
+    max_duration: 600

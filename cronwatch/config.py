@@ -1,69 +1,80 @@
-"""Configuration loader for cronwatch."""
+"""Configuration models and loader for cronwatch."""
+from __future__ import annotations
 
-import os
-import yaml
+import pathlib
 from dataclasses import dataclass, field
 from typing import List, Optional
+
+import yaml
 
 
 @dataclass
 class JobConfig:
     name: str
+    command: str
     schedule: str
-    timeout: int = 3600  # seconds
-    alert_on_failure: bool = True
-    alert_on_timeout: bool = True
-    tags: List[str] = field(default_factory=list)
+    timeout: Optional[int] = None
+    max_duration: Optional[int] = None
 
 
 @dataclass
 class AlertConfig:
     email: Optional[str] = None
-    webhook_url: Optional[str] = None
-    slack_channel: Optional[str] = None
+    on_failure: bool = True
+    on_timeout: bool = True
+    on_slow: bool = False
+
+
+@dataclass
+class RetentionConfig:
+    max_age_days: Optional[int] = None
+    max_entries: Optional[int] = None
 
 
 @dataclass
 class CronwatchConfig:
     jobs: List[JobConfig] = field(default_factory=list)
-    alerts: AlertConfig = field(default_factory=AlertConfig)
-    log_file: str = "cronwatch.log"
-    check_interval: int = 60
+    alert: AlertConfig = field(default_factory=AlertConfig)
+    history_path: str = "~/.cronwatch/history.json"
+    retention: RetentionConfig = field(default_factory=RetentionConfig)
 
 
-def load_config(path: str = "cronwatch.yml") -> CronwatchConfig:
-    """Load configuration from a YAML file."""
-    if not os.path.exists(path):
+def load_config(path: str) -> CronwatchConfig:
+    config_path = pathlib.Path(path)
+    if not config_path.exists():
         raise FileNotFoundError(f"Config file not found: {path}")
 
-    with open(path, "r") as f:
-        raw = yaml.safe_load(f)
-
-    if raw is None:
-        raw = {}
+    with config_path.open() as fh:
+        raw = yaml.safe_load(fh) or {}
 
     jobs = [
         JobConfig(
             name=j["name"],
+            command=j["command"],
             schedule=j["schedule"],
-            timeout=j.get("timeout", 3600),
-            alert_on_failure=j.get("alert_on_failure", True),
-            alert_on_timeout=j.get("alert_on_timeout", True),
-            tags=j.get("tags", []),
+            timeout=j.get("timeout"),
+            max_duration=j.get("max_duration"),
         )
         for j in raw.get("jobs", [])
     ]
 
-    alert_raw = raw.get("alerts", {})
-    alerts = AlertConfig(
+    alert_raw = raw.get("alert", {})
+    alert = AlertConfig(
         email=alert_raw.get("email"),
-        webhook_url=alert_raw.get("webhook_url"),
-        slack_channel=alert_raw.get("slack_channel"),
+        on_failure=alert_raw.get("on_failure", True),
+        on_timeout=alert_raw.get("on_timeout", True),
+        on_slow=alert_raw.get("on_slow", False),
+    )
+
+    retention_raw = raw.get("retention", {})
+    retention = RetentionConfig(
+        max_age_days=retention_raw.get("max_age_days"),
+        max_entries=retention_raw.get("max_entries"),
     )
 
     return CronwatchConfig(
         jobs=jobs,
-        alerts=alerts,
-        log_file=raw.get("log_file", "cronwatch.log"),
-        check_interval=raw.get("check_interval", 60),
+        alert=alert,
+        history_path=raw.get("history_path", "~/.cronwatch/history.json"),
+        retention=retention,
     )
