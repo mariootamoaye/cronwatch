@@ -14,6 +14,7 @@ jobs:
     timeout: 1800
     alert_on_failure: true
     alert_on_timeout: true
+    retries: 2
     tags:
       - backup
       - critical
@@ -23,6 +24,7 @@ jobs:
     timeout: 300
     alert_on_failure: true
     alert_on_timeout: false
+    retries: 3
     tags:
       - sync
 
@@ -31,5 +33,6 @@ jobs:
     timeout: 600
     alert_on_failure: true
     alert_on_timeout: true
+    retries: 1
     tags:
       - reporting
