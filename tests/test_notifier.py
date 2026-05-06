@@ -82,3 +82,17 @@ def test_notification_result_defaults():
     assert nr.nothing_sent
     assert not nr.all_succeeded
     assert nr.errors == []
+
+
+@patch("cronwatch.notifier.send_email_alert")
+def test_slow_job_not_alerted_when_on_slow_disabled(mock_send):
+    """Verify that a slow (but successful) job does not trigger an alert
+    when on_slow is False in the alert configuration.
+    """
+    # duration exceeds max_duration, but on_slow=False so no alert expected
+    result = dispatch(
+        _make_result(exit_code=0, duration=120.0, max_duration=60.0),
+        _make_alert_cfg(),
+    )
+    mock_send.assert_not_called()
+    assert result.nothing_sent
