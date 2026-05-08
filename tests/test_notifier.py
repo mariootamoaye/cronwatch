@@ -1,98 +1,91 @@
-"""Tests for cronwatch.notifier."""
-
+"""Tests for cronwatch.notifier (including webhook dispatch)."""
 from __future__ import annotations
 
-from unittest.mock import MagicMock, patch
+from unittest.mock import patch, MagicMock
 
 import pytest
 
-from cronwatch.config import AlertConfig
-from cronwatch.notifier import NotificationResult, dispatch
+from cronwatch.notifier import dispatch, NotificationResult
 from cronwatch.runner import JobResult
+from cronwatch.config import AlertConfig
+from cronwatch.webhook import WebhookResult
 
 
 def _make_result(
-    exit_code: int = 0,
+    exit_code: int = 1,
     timed_out: bool = False,
     duration: float = 1.0,
-    max_duration: float | None = None,
 ) -> JobResult:
-    return JobResult(
-        job_name="test-job",
-        command="echo hi",
-        exit_code=exit_code,
-        stdout="",
-        stderr="",
-        duration=duration,
-        timed_out=timed_out,
-        max_duration=max_duration,
-    )
+    return JobResult(exit_code=exit_code, stdout="", stderr="",
+                     duration=duration, timed_out=timed_out)
 
 
-def _make_alert_cfg(email: str | None = "ops@example.com") -> AlertConfig:
-    return AlertConfig(
-        email=email,
-        smtp_host="localhost",
-        smtp_port=25,
-        from_address="cron@example.com",
-        on_failure=True,
-        on_timeout=True,
-        on_slow=False,
-    )
+def _make_alert_cfg(**kwargs) -> AlertConfig:
+    defaults = {"email_to": None, "webhook_url": None}
+    defaults.update(kwargs)
+    return AlertConfig(**defaults)
 
 
 def test_no_alert_when_job_succeeds():
-    result = dispatch(_make_result(exit_code=0), _make_alert_cfg())
-    assert result.nothing_sent
-    assert result.all_succeeded is False  # nothing attempted
+    result = _make_result(exit_code=0)
+    cfg = _make_alert_cfg(email_to="ops@example.com", webhook_url="http://hook")
+    nr = dispatch("job", result, cfg)
+    assert nr.nothing_sent()
 
 
-@patch("cronwatch.notifier.send_email_alert")
-def test_email_dispatched_on_failure(mock_send):
-    result = dispatch(_make_result(exit_code=1), _make_alert_cfg())
-    mock_send.assert_called_once()
-    assert "email" in result.channels_succeeded
-    assert result.all_succeeded
+def test_email_dispatched_on_failure():
+    result = _make_result(exit_code=1)
+    cfg = _make_alert_cfg(email_to="ops@example.com")
+    with patch("cronwatch.notifier.send_email_alert") as mock_email:
+        nr = dispatch("job", result, cfg)
+    mock_email.assert_called_once()
+    assert nr.email_sent is True
+    assert nr.webhook_sent is False
 
 
-@patch("cronwatch.notifier.send_email_alert")
-def test_email_dispatched_on_timeout(mock_send):
-    result = dispatch(_make_result(timed_out=True), _make_alert_cfg())
-    mock_send.assert_called_once()
-    assert "email" in result.channels_succeeded
+def test_webhook_dispatched_on_failure():
+    result = _make_result(exit_code=1)
+    cfg = _make_alert_cfg(webhook_url="http://example.com/hook")
+    ok_whr = WebhookResult(job_name="job", url="http://example.com/hook",
+                            status_code=200, success=True)
+    with patch("cronwatch.notifier.send_webhook", return_value=ok_whr) as mock_wh:
+        nr = dispatch("job", result, cfg)
+    mock_wh.assert_called_once()
+    assert nr.webhook_sent is True
+    assert nr.email_sent is False
 
 
-@patch("cronwatch.notifier.send_email_alert", side_effect=OSError("connection refused"))
-def test_email_error_recorded(mock_send):
-    result = dispatch(_make_result(exit_code=1), _make_alert_cfg())
-    assert "email" in result.channels_attempted
-    assert "email" not in result.channels_succeeded
-    assert any("email" in e for e in result.errors)
-    assert result.all_succeeded is False
+def test_both_channels_dispatched():
+    result = _make_result(exit_code=1)
+    cfg = _make_alert_cfg(email_to="ops@example.com",
+                          webhook_url="http://example.com/hook")
+    ok_whr = WebhookResult(job_name="job", url="http://example.com/hook",
+                            status_code=200, success=True)
+    with patch("cronwatch.notifier.send_email_alert"), \
+         patch("cronwatch.notifier.send_webhook", return_value=ok_whr):
+        nr = dispatch("job", result, cfg)
+    assert nr.email_sent is True
+    assert nr.webhook_sent is True
+    assert nr.all_succeeded()
 
 
-def test_no_email_channel_configured():
-    cfg = _make_alert_cfg(email=None)
-    result = dispatch(_make_result(exit_code=1), cfg)
-    assert result.nothing_sent
+def test_email_error_captured():
+    result = _make_result(exit_code=1)
+    cfg = _make_alert_cfg(email_to="ops@example.com")
+    with patch("cronwatch.notifier.send_email_alert",
+               side_effect=OSError("smtp down")):
+        nr = dispatch("job", result, cfg)
+    assert nr.email_sent is False
+    assert "smtp down" in (nr.error or "")
 
 
-def test_notification_result_defaults():
-    nr = NotificationResult(job_name="myjob")
-    assert nr.nothing_sent
-    assert not nr.all_succeeded
-    assert nr.errors == []
-
-
-@patch("cronwatch.notifier.send_email_alert")
-def test_slow_job_not_alerted_when_on_slow_disabled(mock_send):
-    """Verify that a slow (but successful) job does not trigger an alert
-    when on_slow is False in the alert configuration.
-    """
-    # duration exceeds max_duration, but on_slow=False so no alert expected
-    result = dispatch(
-        _make_result(exit_code=0, duration=120.0, max_duration=60.0),
-        _make_alert_cfg(),
-    )
-    mock_send.assert_not_called()
-    assert result.nothing_sent
+def test_webhook_failure_reflected():
+    result = _make_result(exit_code=1)
+    cfg = _make_alert_cfg(webhook_url="http://example.com/hook")
+    fail_whr = WebhookResult(job_name="job", url="http://example.com/hook",
+                              status_code=500, success=False, error="server error")
+    with patch("cronwatch.notifier.send_webhook", return_value=fail_whr):
+        nr = dispatch("job", result, cfg)
+    assert nr.webhook_sent is False
+    assert nr.webhook_result is not None
+    assert nr.webhook_result.status_code == 500

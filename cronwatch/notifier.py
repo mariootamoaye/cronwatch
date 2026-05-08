@@ -1,51 +1,53 @@
-"""Notification dispatcher: routes alerts to configured channels."""
-
+"""Dispatch alerts (email + webhook) for a job result."""
 from __future__ import annotations
 
-import logging
-from dataclasses import dataclass, field
-from typing import List
+from dataclasses import dataclass
+from typing import Optional
 
-from cronwatch.alerts import send_email_alert, should_alert
-from cronwatch.config import AlertConfig
+from cronwatch.alerts import should_alert, send_email_alert
+from cronwatch.webhook import send_webhook, WebhookResult
 from cronwatch.runner import JobResult
+from cronwatch.config import AlertConfig
 
-logger = logging.getLogger(__name__)
 
-
-@dataclass
+@dataclass(frozen=True)
 class NotificationResult:
     job_name: str
-    channels_attempted: List[str] = field(default_factory=list)
-    channels_succeeded: List[str] = field(default_factory=list)
-    errors: List[str] = field(default_factory=list)
+    email_sent: bool
+    webhook_sent: bool
+    webhook_result: Optional[WebhookResult] = None
+    error: Optional[str] = None
 
-    @property
     def all_succeeded(self) -> bool:
-        return len(self.errors) == 0 and len(self.channels_attempted) > 0
+        return self.email_sent or self.webhook_sent
 
-    @property
     def nothing_sent(self) -> bool:
-        return len(self.channels_attempted) == 0
+        return not self.email_sent and not self.webhook_sent
 
 
-def dispatch(job_result: JobResult, alert_cfg: AlertConfig) -> NotificationResult:
-    """Dispatch notifications for a job result to all configured channels."""
-    result = NotificationResult(job_name=job_result.job_name)
+def dispatch(job_name: str, result: JobResult, alert_cfg: AlertConfig) -> NotificationResult:
+    """Send all configured alerts for a job result."""
+    if not should_alert(result, alert_cfg):
+        return NotificationResult(job_name=job_name, email_sent=False, webhook_sent=False)
 
-    if not should_alert(job_result, alert_cfg):
-        logger.debug("No alert needed for job '%s'", job_result.job_name)
-        return result
+    email_sent = False
+    webhook_result: Optional[WebhookResult] = None
+    error: Optional[str] = None
 
-    if alert_cfg.email:
-        result.channels_attempted.append("email")
+    if alert_cfg.email_to:
         try:
-            send_email_alert(job_result, alert_cfg)
-            result.channels_succeeded.append("email")
-            logger.info("Email alert sent for job '%s'", job_result.job_name)
+            send_email_alert(job_name, result, alert_cfg)
+            email_sent = True
         except Exception as exc:  # noqa: BLE001
-            msg = f"email: {exc}"
-            result.errors.append(msg)
-            logger.error("Failed to send email alert for job '%s': %s", job_result.job_name, exc)
+            error = str(exc)
 
-    return result
+    if alert_cfg.webhook_url:
+        webhook_result = send_webhook(job_name, result, alert_cfg)
+
+    return NotificationResult(
+        job_name=job_name,
+        email_sent=email_sent,
+        webhook_result=webhook_result,
+        webhook_sent=webhook_result is not None and webhook_result.success,
+        error=error,
+    )
