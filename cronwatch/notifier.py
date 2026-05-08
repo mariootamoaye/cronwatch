@@ -1,53 +1,62 @@
-"""Dispatch alerts (email + webhook) for a job result."""
+"""Dispatch notifications (email, webhook) for job results."""
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
+from pathlib import Path
 from typing import Optional
 
 from cronwatch.alerts import should_alert, send_email_alert
-from cronwatch.webhook import send_webhook, WebhookResult
-from cronwatch.runner import JobResult
 from cronwatch.config import AlertConfig
+from cronwatch.mute import is_muted, _DEFAULT_PATH as _MUTE_PATH
+from cronwatch.runner import JobResult
+from cronwatch.webhook import send_webhook
 
 
-@dataclass(frozen=True)
+@dataclass
 class NotificationResult:
     job_name: str
-    email_sent: bool
-    webhook_sent: bool
-    webhook_result: Optional[WebhookResult] = None
-    error: Optional[str] = None
+    email_sent: bool = False
+    webhook_sent: bool = False
+    muted: bool = False
+    errors: list[str] = field(default_factory=list)
 
+    @property
     def all_succeeded(self) -> bool:
-        return self.email_sent or self.webhook_sent
+        return not self.errors
 
+    @property
     def nothing_sent(self) -> bool:
         return not self.email_sent and not self.webhook_sent
 
 
-def dispatch(job_name: str, result: JobResult, alert_cfg: AlertConfig) -> NotificationResult:
-    """Send all configured alerts for a job result."""
+def dispatch(
+    result: JobResult,
+    alert_cfg: AlertConfig,
+    mute_path: Optional[Path] = None,
+) -> NotificationResult:
+    """Send alerts for *result* unless the job is muted or no alert is needed."""
+    mute_path = mute_path or _MUTE_PATH
+    nr = NotificationResult(job_name=result.job.name)
+
+    if is_muted(result.job.name, path=mute_path):
+        nr.muted = True
+        return nr
+
     if not should_alert(result, alert_cfg):
-        return NotificationResult(job_name=job_name, email_sent=False, webhook_sent=False)
+        return nr
 
-    email_sent = False
-    webhook_result: Optional[WebhookResult] = None
-    error: Optional[str] = None
-
-    if alert_cfg.email_to:
-        try:
-            send_email_alert(job_name, result, alert_cfg)
-            email_sent = True
-        except Exception as exc:  # noqa: BLE001
-            error = str(exc)
+    if alert_cfg.email:
+        outcome = send_email_alert(result, alert_cfg)
+        if outcome.success:
+            nr.email_sent = True
+        else:
+            nr.errors.append(f"email: {outcome.error}")
 
     if alert_cfg.webhook_url:
-        webhook_result = send_webhook(job_name, result, alert_cfg)
+        outcome = send_webhook(result, alert_cfg)
+        if outcome.success:
+            nr.webhook_sent = True
+        else:
+            nr.errors.append(f"webhook: {outcome.error}")
 
-    return NotificationResult(
-        job_name=job_name,
-        email_sent=email_sent,
-        webhook_result=webhook_result,
-        webhook_sent=webhook_result is not None and webhook_result.success,
-        error=error,
-    )
+    return nr
