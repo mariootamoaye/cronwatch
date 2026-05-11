@@ -35,6 +35,12 @@ def test_mute_entry_expired():
     assert entry.is_active(_NOW) is False
 
 
+def test_mute_entry_expires_exactly_at_boundary():
+    """An entry whose muted_until equals now should be considered expired."""
+    entry = MuteEntry(job_name="backup", muted_until=_NOW.isoformat())
+    assert entry.is_active(_NOW) is False
+
+
 def test_mute_job_creates_file(mute_file: Path):
     mute_job("backup", _FUTURE, path=mute_file)
     assert mute_file.exists()
@@ -50,6 +56,16 @@ def test_mute_job_replaces_existing(mute_file: Path):
     data = json.loads(mute_file.read_text())
     assert len(data) == 1
     assert new_until.isoformat() in data[0]["muted_until"]
+
+
+def test_mute_job_multiple_jobs(mute_file: Path):
+    """Muting distinct jobs should create separate entries."""
+    mute_job("job-a", _FUTURE, path=mute_file)
+    mute_job("job-b", _FUTURE, path=mute_file)
+    data = json.loads(mute_file.read_text())
+    assert len(data) == 2
+    names = {entry["job_name"] for entry in data}
+    assert names == {"job-a", "job-b"}
 
 
 def test_is_muted_returns_true_when_active(mute_file: Path):
