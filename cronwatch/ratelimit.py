@@ -65,3 +65,25 @@ def clear_rate_limit(path: Path, job_name: str) -> bool:
     del data[job_name]
     _save_raw(path, data)
     return True
+
+
+def seconds_until_clear(
+    path: Path,
+    job_name: str,
+    cooldown_seconds: int,
+    now: Optional[float] = None,
+) -> Optional[float]:
+    """Return how many seconds remain in the cooldown for *job_name*.
+
+    Returns ``None`` if *job_name* has no rate-limit record or is not currently
+    cooling down.  Returns ``0.0`` if the cooldown has just expired.
+    """
+    if cooldown_seconds <= 0:
+        return None
+    data = _load_raw(path)
+    if job_name not in data:
+        return None
+    if now is None:
+        now = time.time()
+    remaining = cooldown_seconds - (now - data[job_name])
+    return max(remaining, 0.0) if remaining > 0 else None
