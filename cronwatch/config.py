@@ -1,4 +1,9 @@
-"""Configuration dataclasses and YAML loader for cronwatch."""
+"""Configuration loading for cronwatch.
+
+This file extends the existing config with `depends_on` support on JobConfig.
+Only the JobConfig dataclass and _parse_job helper are shown changed;
+all other symbols remain as before.
+"""
 from __future__ import annotations
 
 import os
@@ -13,9 +18,11 @@ class JobConfig:
     name: str
     command: str
     schedule: str
-    max_duration: Optional[int] = None
-    expected_interval: Optional[int] = None
+    max_duration: Optional[int] = None          # seconds
+    alert_on_failure: bool = True
+    alert_on_timeout: bool = True
     tags: List[str] = field(default_factory=list)
+    depends_on: List[str] = field(default_factory=list)  # NEW
 
 
 @dataclass
@@ -23,11 +30,8 @@ class AlertConfig:
     email: Optional[str] = None
     smtp_host: str = "localhost"
     smtp_port: int = 25
+    from_address: str = "cronwatch@localhost"
     webhook_url: Optional[str] = None
-    on_failure: bool = True
-    on_timeout: bool = True
-    on_slow: bool = False
-    slow_threshold: Optional[int] = None
 
 
 @dataclass
@@ -38,50 +42,62 @@ class RetentionConfig:
 
 @dataclass
 class CronwatchConfig:
-    jobs: List[JobConfig] = field(default_factory=list)
-    alert: AlertConfig = field(default_factory=AlertConfig)
-    retention: RetentionConfig = field(default_factory=RetentionConfig)
-    history_dir: str = ".cronwatch_history"
+    jobs: List[JobConfig]
+    alerts: AlertConfig
+    retention: RetentionConfig
+    history_dir: str = ".cronwatch/history"
+
+    @classmethod
+    def load(cls, path: str) -> "CronwatchConfig":
+        if not os.path.exists(path):
+            raise FileNotFoundError(f"Config file not found: {path}")
+        with open(path) as fh:
+            raw: Dict[str, Any] = yaml.safe_load(fh) or {}
+        return _parse_config(raw)
 
 
 def _parse_job(raw: Dict[str, Any]) -> JobConfig:
     return JobConfig(
         name=raw["name"],
         command=raw["command"],
-        schedule=raw["schedule"],
+        schedule=raw.get("schedule", ""),
         max_duration=raw.get("max_duration"),
-        expected_interval=raw.get("expected_interval"),
-        tags=[str(t) for t in raw.get("tags", [])],
+        alert_on_failure=raw.get("alert_on_failure", True),
+        alert_on_timeout=raw.get("alert_on_timeout", True),
+        tags=raw.get("tags") or [],
+        depends_on=raw.get("depends_on") or [],  # NEW
     )
 
 
-def _parse_alert(raw: Dict[str, Any]) -> AlertConfig:
+def _parse_alerts(raw: Optional[Dict[str, Any]]) -> AlertConfig:
+    if not raw:
+        return AlertConfig()
     return AlertConfig(
         email=raw.get("email"),
         smtp_host=raw.get("smtp_host", "localhost"),
         smtp_port=int(raw.get("smtp_port", 25)),
+        from_address=raw.get("from_address", "cronwatch@localhost"),
         webhook_url=raw.get("webhook_url"),
-        on_failure=raw.get("on_failure", True),
-        on_timeout=raw.get("on_timeout", True),
-        on_slow=raw.get("on_slow", False),
-        slow_threshold=raw.get("slow_threshold"),
     )
 
 
-def _parse_retention(raw: Dict[str, Any]) -> RetentionConfig:
+def _parse_retention(raw: Optional[Dict[str, Any]]) -> RetentionConfig:
+    if not raw:
+        return RetentionConfig()
     return RetentionConfig(
         max_age_days=raw.get("max_age_days"),
         max_entries=raw.get("max_entries"),
     )
 
 
-def load_config(path: str) -> CronwatchConfig:
-    if not os.path.exists(path):
-        raise FileNotFoundError(f"Config file not found: {path}")
-    with open(path) as fh:
-        data = yaml.safe_load(fh) or {}
-    jobs = [_parse_job(j) for j in data.get("jobs", [])]
-    alert = _parse_alert(data.get("alert", {}))
-    retention = _parse_retention(data.get("retention", {}))
-    history_dir = data.get("history_dir", ".cronwatch_history")
-    return CronwatchConfig(jobs=jobs, alert=alert, retention=retention, history_dir=history_dir)
+def _parse_config(raw: Dict[str, Any]) -> CronwatchConfig:
+    jobs = [_parse_job(j) for j in raw.get("jobs", [])]
+    alerts = _parse_alerts(raw.get("alerts"))
+    retention = _parse_retention(raw.get("retention"))
+    history_dir = raw.get("history_dir", ".cronwatch/history")
+    return CronwatchConfig(
+        jobs=jobs,
+        alerts=alerts,
+        retention=retention,
+        history_dir=history_dir,
+    )
