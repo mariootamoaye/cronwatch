@@ -48,6 +48,18 @@ def test_parse_duration_invalid():
         _parse_duration("5x")
 
 
+def test_parse_duration_invalid_no_unit():
+    """A bare integer with no unit suffix should raise ArgumentTypeError."""
+    with pytest.raises(argparse.ArgumentTypeError):
+        _parse_duration("60")
+
+
+def test_parse_duration_empty_string():
+    """An empty string should raise ArgumentTypeError."""
+    with pytest.raises(argparse.ArgumentTypeError):
+        _parse_duration("")
+
+
 # --- cmd_mute ---
 
 def test_cmd_mute_creates_entry(mute_file: Path, capsys):
