@@ -50,3 +50,10 @@ def test_body_avg_duration_displayed() -> None:
 def test_success_rate_100_when_no_runs() -> None:
     s = DigestStats(job_name="empty")
     assert s.success_rate == 100.0
+
+
+def test_body_empty_stats_renders_without_error() -> None:
+    """render_body should not raise and should still show the header when stats is empty."""
+    body = render_body(_digest([]))
+    assert "Job" in body
+    assert "Jobs healthy: 0/0" in body
