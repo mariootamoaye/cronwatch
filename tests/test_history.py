@@ -87,3 +87,24 @@ def test_different_jobs_isolated(history_file: Path) -> None:
 def test_corrupt_history_file_returns_empty(history_file: Path) -> None:
     history_file.write_text("not valid json")
     assert get_entries("any_job", path=history_file) == []
+
+
+def test_record_preserves_fields(history_file: Path) -> None:
+    """Ensure all fields on a recorded entry round-trip correctly."""
+    entry = HistoryEntry(
+        job_name="full_check",
+        started_at="2024-06-01T08:30:00",
+        duration_seconds=42.7,
+        exit_code=2,
+        timed_out=True,
+        success=False,
+    )
+    record(entry, path=history_file)
+    retrieved = last_entry("full_check", path=history_file)
+    assert retrieved is not None
+    assert retrieved.job_name == "full_check"
+    assert retrieved.started_at == "2024-06-01T08:30:00"
+    assert retrieved.duration_seconds == pytest.approx(42.7)
+    assert retrieved.exit_code == 2
+    assert retrieved.timed_out is True
+    assert retrieved.success is False
