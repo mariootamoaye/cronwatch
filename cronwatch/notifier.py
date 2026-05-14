@@ -28,6 +28,19 @@ class NotificationResult:
     def nothing_sent(self) -> bool:
         return not self.email_sent and not self.webhook_sent
 
+    def __str__(self) -> str:
+        """Return a human-readable summary of the notification outcome."""
+        if self.muted:
+            return f"[{self.job_name}] muted – no notifications sent"
+        parts = []
+        if self.email_sent:
+            parts.append("email")
+        if self.webhook_sent:
+            parts.append("webhook")
+        sent = ", ".join(parts) if parts else "none"
+        error_summary = f"; errors: {'; '.join(self.errors)}" if self.errors else ""
+        return f"[{self.job_name}] sent={sent}{error_summary}"
+
 
 def dispatch(
     result: JobResult,
