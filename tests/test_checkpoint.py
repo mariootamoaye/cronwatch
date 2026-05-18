@@ -20,6 +20,15 @@ def cp_file(tmp_path: Path) -> Path:
     return tmp_path / "checkpoints.json"
 
 
+@pytest.fixture()
+def populated_cp_file(cp_file: Path) -> Path:
+    """A checkpoint file pre-populated with entries for multiple jobs."""
+    record_checkpoint(cp_file, job="backup", name="start")
+    record_checkpoint(cp_file, job="backup", name="upload")
+    record_checkpoint(cp_file, job="report", name="generate")
+    return cp_file
+
+
 def test_record_creates_file(cp_file: Path) -> None:
     record_checkpoint(cp_file, job="backup", name="start")
     assert cp_file.exists()
@@ -33,18 +42,13 @@ def test_record_returns_entry(cp_file: Path) -> None:
     assert entry.timestamp  # non-empty ISO string
 
 
-def test_multiple_records_accumulate(cp_file: Path) -> None:
-    record_checkpoint(cp_file, job="backup", name="start")
-    record_checkpoint(cp_file, job="backup", name="upload")
-    record_checkpoint(cp_file, job="report", name="generate")
-    entries = list_checkpoints(cp_file)
+def test_multiple_records_accumulate(populated_cp_file: Path) -> None:
+    entries = list_checkpoints(populated_cp_file)
     assert len(entries) == 3
 
 
-def test_list_filter_by_job(cp_file: Path) -> None:
-    record_checkpoint(cp_file, job="backup", name="start")
-    record_checkpoint(cp_file, job="report", name="generate")
-    entries = list_checkpoints(cp_file, job="backup")
+def test_list_filter_by_job(populated_cp_file: Path) -> None:
+    entries = list_checkpoints(populated_cp_file, job="backup")
     assert len(entries) == 1
     assert entries[0].job == "backup"
 
@@ -65,12 +69,10 @@ def test_last_checkpoint_returns_none_for_unknown_job(cp_file: Path) -> None:
     assert last_checkpoint(cp_file, job="ghost") is None
 
 
-def test_clear_removes_only_target_job(cp_file: Path) -> None:
-    record_checkpoint(cp_file, job="backup", name="start")
-    record_checkpoint(cp_file, job="report", name="generate")
-    removed = clear_checkpoints(cp_file, job="backup")
-    assert removed == 1
-    remaining = list_checkpoints(cp_file)
+def test_clear_removes_only_target_job(populated_cp_file: Path) -> None:
+    removed = clear_checkpoints(populated_cp_file, job="backup")
+    assert removed == 2
+    remaining = list_checkpoints(populated_cp_file)
     assert len(remaining) == 1
     assert remaining[0].job == "report"
 
